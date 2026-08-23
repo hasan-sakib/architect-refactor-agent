@@ -1,0 +1,36 @@
+services:
+  backend:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      # Docker-outside-of-Docker: needed only if the backend runs *inside*
+      # this container and must still control sandbox containers on the host.
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - ./backend/.env
+    environment:
+      # Docker Desktop only: lets the containerized backend reach the
+      # host's natively-running Ollama instance.
+      OLLAMA_API_BASE: http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    command: bash -c "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ---- Reserved for Phase 2 ----
+  # chroma:
+  #   image: chromadb/chroma:latest
+  #   ports:
+  #     - "8001:8000"
+  #   volumes:
+  #     - chroma_data:/chroma/chroma
+
+  # Ollama runs natively on the host per the local-default-stack decision;
+  # not containerized here to avoid duplicate GPU/model-cache setups.
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+
+# volumes:
+#   chroma_data:

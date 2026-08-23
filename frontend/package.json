@@ -1,0 +1,9 @@
+{
+  "name": "refactor-agent-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Mission Control dashboard placeholder scaffold; real implementation in Phase 5.",
+  "scripts": {
+    "dev": "echo 'Not implemented until Phase 5' && exit 1"
+  }
+}
