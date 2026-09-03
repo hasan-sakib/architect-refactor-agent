@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +45,18 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+
+    # --- Uploads ---
+    # HOST_HOME is only set when running dockerized (docker-compose injects
+    # the *host's* $HOME) — inside the backend container, Path.home() would
+    # otherwise resolve to /root, which the host's Docker daemon (used via
+    # DooD to bind-mount into sandbox containers) has no knowledge of.
+    HOST_HOME: str = ""
+
+    @property
+    def upload_root(self) -> str:
+        base = self.HOST_HOME or str(Path.home())
+        return str(Path(base) / ".refactor-agent-uploads")
 
 
 @lru_cache

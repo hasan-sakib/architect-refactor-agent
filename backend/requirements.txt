@@ -4,6 +4,7 @@ uvicorn[standard]>=0.30,<0.53
 pydantic>=2.7,<3.0
 pydantic-settings>=2.4,<3.0
 python-dotenv>=1.0,<2.0
+python-multipart>=0.0.20,<0.1.0
 
 # ---- Sandbox Driver (Phase 1) ----
 docker>=7.0,<8.0

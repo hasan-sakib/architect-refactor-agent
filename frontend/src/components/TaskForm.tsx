@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { uploadRepository } from "../api";
 import type { TaskCreateRequest } from "../types";
 
 interface TaskFormProps {
@@ -12,6 +13,28 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
   const [task, setTask] = useState("");
   const [testCommand, setTestCommand] = useState("pytest -q");
   const [maxIterations, setMaxIterations] = useState(3);
+  const [uploadState, setUploadState] = useState<
+    { status: "idle" } | { status: "uploading" } | { status: "done"; fileCount: number } | { status: "error"; message: string }
+  >({ status: "idle" });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // webkitdirectory has no JSX/TS prop — set it imperatively on the input.
+  useEffect(() => {
+    fileInputRef.current?.setAttribute("webkitdirectory", "");
+  }, []);
+
+  async function handleFolderSelected(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    setUploadState({ status: "uploading" });
+    try {
+      const { repoPath: uploadedPath, fileCount } = await uploadRepository(fileList);
+      setRepoPath(uploadedPath);
+      setUploadState({ status: "done", fileCount });
+    } catch (err) {
+      setUploadState({ status: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   return (
     <form
@@ -23,7 +46,24 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs text-neutral-400">
-          Repository path (host)
+          <div className="flex items-center justify-between">
+            <span>Repository path (host)</span>
+            <button
+              type="button"
+              disabled={disabled || uploadState.status === "uploading"}
+              onClick={() => fileInputRef.current?.click()}
+              className="text-xs font-medium text-sky-400 hover:text-sky-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {uploadState.status === "uploading" ? "Uploading…" : "Upload folder instead"}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => handleFolderSelected(e.target.files)}
+            />
+          </div>
           <input
             required
             disabled={disabled}
@@ -32,6 +72,10 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
             placeholder="/path/to/target/repo"
             className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-mono text-sm text-neutral-100 disabled:opacity-50"
           />
+          {uploadState.status === "done" && (
+            <span className="text-emerald-400">Uploaded {uploadState.fileCount} file(s)</span>
+          )}
+          {uploadState.status === "error" && <span className="text-rose-400">{uploadState.message}</span>}
         </label>
         <label className="flex flex-col gap-1 text-xs text-neutral-400">
           Test command (runs inside sandbox)

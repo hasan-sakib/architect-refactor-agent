@@ -19,3 +19,8 @@ class TaskStatusResponse(BaseModel):
     status: str
     events: list[dict]
     final_state: Optional[dict] = None
+
+
+class UploadResponse(BaseModel):
+    repo_path: str
+    file_count: int

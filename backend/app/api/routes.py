@@ -1,17 +1,47 @@
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.executor import execute_task
-from app.api.schemas import TaskCreateRequest, TaskCreateResponse, TaskStatusResponse
+from app.api.schemas import TaskCreateRequest, TaskCreateResponse, TaskStatusResponse, UploadResponse
 from app.api.task_manager import task_manager
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/api")
+settings = get_settings()
 
 SSE_KEEPALIVE_SECONDS = 15
+
+
+def _safe_relative_path(raw: str) -> Path:
+    """Rejects absolute paths and any '..' segment — raw is a browser-supplied
+    filename (we ask the frontend to send each file's folder-relative path as
+    its multipart filename), so it must be treated as untrusted input."""
+    parts = [p for p in raw.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts):
+        raise HTTPException(status_code=400, detail=f"invalid path in upload: {raw!r}")
+    return Path(*parts)
+
+
+@router.post("/uploads", response_model=UploadResponse)
+async def upload_repository(files: list[UploadFile] = File(...)) -> UploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="no files provided")
+
+    dest_root = Path(settings.upload_root) / uuid.uuid4().hex[:12]
+    dest_root.mkdir(parents=True, exist_ok=True)
+
+    for upload in files:
+        relative = _safe_relative_path(upload.filename or "")
+        dest_path = dest_root / relative
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(await upload.read())
+
+    return UploadResponse(repo_path=str(dest_root), file_count=len(files))
 
 
 @router.post("/tasks", response_model=TaskCreateResponse)

@@ -22,6 +22,10 @@ services:
       # natively-running Ollama instance (kept off Docker for GPU speed —
       # Docker Desktop on macOS has no Metal/GPU passthrough).
       OLLAMA_API_BASE: http://host.docker.internal:11434
+      # The container's own $HOME (e.g. /root) isn't the host's — uploads
+      # need to land under the host's real home dir so the mirror mount
+      # above and the host Docker daemon's bind-mount both see the same path.
+      HOST_HOME: ${HOME}
     ports:
       - "8000:8000"
 
