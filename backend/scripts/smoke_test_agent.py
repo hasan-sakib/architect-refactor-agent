@@ -71,7 +71,7 @@ def main() -> None:
         )
 
         print(f"\n[3/3] Final status: {final_state['status']} (iteration {final_state['iteration']})")
-        print(f"      files_changed: {final_state['files_changed']}")
+        print(f"      files_changed: {[f['path'] for f in final_state['files_changed']]}")
         print(f"      test_exit_code: {final_state['test_exit_code']}")
         print("--- final calc.py ---")
         print((workspace / "calc.py").read_text())

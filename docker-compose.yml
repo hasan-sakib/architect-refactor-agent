@@ -1,21 +1,37 @@
 services:
   backend:
-    image: python:3.11-slim
-    working_dir: /app
+    build:
+      context: ./backend
+    # Docker-outside-of-Docker: the backend runs *inside* this container but
+    # must still build/start sandbox containers via the host's Docker daemon
+    # (paths in bind mounts, e.g. a target repo's host path, are resolved by
+    # that daemon against the host filesystem — this is what makes DooD work
+    # transparently for repo_path values the user enters in the UI).
     volumes:
-      - ./backend:/app
-      # Docker-outside-of-Docker: needed only if the backend runs *inside*
-      # this container and must still control sandbox containers on the host.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mirror-mounted at the same path as on the host: repo_path values the
+      # user enters (e.g. /Users/you/some-repo) must resolve both when the
+      # backend itself stats the path (this mount) AND when the host's Docker
+      # daemon bind-mounts it into a sandbox container (via the socket above,
+      # which always resolves paths against the host, not this container).
+      - ${HOME}:${HOME}
     env_file:
       - ./backend/.env
     environment:
-      # Docker Desktop only: lets the containerized backend reach the
-      # host's natively-running Ollama instance.
+      # Docker Desktop only: lets the containerized backend reach the host's
+      # natively-running Ollama instance (kept off Docker for GPU speed —
+      # Docker Desktop on macOS has no Metal/GPU passthrough).
       OLLAMA_API_BASE: http://host.docker.internal:11434
     ports:
       - "8000:8000"
-    command: bash -c "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
 
   # ---- Reserved for Phase 2 ----
   # chroma:
@@ -26,7 +42,8 @@ services:
   #     - chroma_data:/chroma/chroma
 
   # Ollama runs natively on the host per the local-default-stack decision;
-  # not containerized here to avoid duplicate GPU/model-cache setups.
+  # not containerized here to avoid duplicate GPU/model-cache setups and to
+  # keep Metal GPU acceleration on macOS (Docker Desktop can't pass it through).
   # ollama:
   #   image: ollama/ollama:latest
   #   ports:

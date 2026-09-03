@@ -1,9 +1,27 @@
 {
   "name": "refactor-agent-frontend",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
-  "description": "Mission Control dashboard placeholder scaffold; real implementation in Phase 5.",
+  "description": "Mission Control dashboard for the Autonomous Codebase Refactoring Agent.",
+  "type": "module",
   "scripts": {
-    "dev": "echo 'Not implemented until Phase 5' && exit 1"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "monaco-editor": "^0.56.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
   }
 }

@@ -12,7 +12,7 @@ class AgentState(TypedDict):
     test_command: str
     plan: str
     error_context: str
-    files_changed: list[str]
+    files_changed: list[dict]  # [{"path": str, "before": str, "after": str}, ...]
     test_output: str
     test_exit_code: Optional[int]
     iteration: int

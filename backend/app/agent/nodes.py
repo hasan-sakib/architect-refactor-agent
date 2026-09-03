@@ -15,7 +15,7 @@ from app.agent.state import AgentContext, AgentState
 from app.core.llm import get_completion
 from app.core.logging import get_logger
 from app.tools.exec_tools import run_command
-from app.tools.file_tools import write_file
+from app.tools.file_tools import read_file, write_file
 from app.tools.search_tools import format_search_results, search_codebase
 
 logger = get_logger(__name__)
@@ -58,13 +58,17 @@ def coder_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
     for match in FILE_BLOCK_RE.finditer(response):
         path = match.group("path").strip()
         content = match.group("content")
+        try:
+            before = read_file(runtime.context.driver, path)
+        except Exception:
+            before = ""  # new file — nothing to diff against
         write_file(runtime.context.driver, path, content)
-        files_changed.append(path)
+        files_changed.append({"path": path, "before": before, "after": content})
 
     if not files_changed:
         logger.warning("coder produced no parseable FILE blocks")
 
-    logger.info("coder wrote %d file(s): %s", len(files_changed), files_changed)
+    logger.info("coder wrote %d file(s): %s", len(files_changed), [f["path"] for f in files_changed])
     return {"files_changed": files_changed, "status": "testing"}
 
 
