@@ -7,9 +7,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -ms /bin/bash sandbox
+# Explicit uid/gid (not just useradd's default) so the backend's post-upload
+# chown (routes.py's _chown_tree, matching settings.SANDBOX_UID/GID) always
+# targets the right numeric owner regardless of how this image's defaults
+# might shift over time.
+RUN groupadd -g 1000 sandbox && useradd -m -u 1000 -g 1000 -s /bin/bash sandbox
+
+ENV HOME=/home/sandbox \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
 WORKDIR /workspace
 RUN chown -R sandbox:sandbox /workspace
-USER sandbox
+USER 1000:1000
 
-CMD ["tail", "-f", "/dev/null"]
+# Keep-alive: DockerSandboxDriver drives all real work via exec_run and
+# overrides this at container-start time anyway (see docker_driver.py).
+CMD ["sleep", "infinity"]

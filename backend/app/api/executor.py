@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -61,17 +62,26 @@ def execute_task(ctx: TaskRunContext, req: TaskCreateRequest) -> None:
     emit({"type": "status", "status": "running"})
 
     driver = None
+    watchdog: threading.Timer | None = None
     final_state: dict = {}
     status = "error"
     error_message: str | None = None
+    timed_out = False
     try:
         config = SandboxConfig(
             workspace_path=ctx.repo_path,
             image=settings.sandbox_image,
             mount_path=settings.SANDBOX_WORKSPACE_MOUNT,
             mem_limit=settings.SANDBOX_MEM_LIMIT,
+            memswap_limit=settings.SANDBOX_MEM_LIMIT,
             nano_cpus=settings.sandbox_nano_cpus,
+            pids_limit=settings.SANDBOX_PIDS_LIMIT,
+            user=f"{settings.SANDBOX_UID}:{settings.SANDBOX_GID}",
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            tmpfs={"/tmp": "rw,nosuid,size=512m"},
             network_disabled=settings.SANDBOX_NETWORK_DISABLED,
+            network=settings.SANDBOX_NETWORK_NAME,
             name=f"task-{ctx.task_id.hex[:12]}",
         )
         driver = DockerSandboxDriver(config)
@@ -82,25 +92,47 @@ def execute_task(ctx: TaskRunContext, req: TaskCreateRequest) -> None:
         emit({"type": "log", "message": "Starting sandbox container..."})
         driver.start()
 
+        # Hard watchdog: the graph-step deadline check below only fires
+        # *between* nodes, so it can't interrupt an in-flight blocked
+        # exec_run (e.g. a test command ignoring its own timeout, or a hung
+        # LLM call). Stopping the container from this timer thread makes
+        # any in-flight exec_run return, which is what actually unwedges it.
+        def _on_timeout() -> None:
+            nonlocal timed_out
+            timed_out = True
+            try:
+                driver.stop(timeout=5)
+            except Exception:
+                logger.exception("watchdog failed to stop sandbox for task %s", task_id_str)
+
+        watchdog = threading.Timer(settings.TASK_MAX_WALL_SECONDS, _on_timeout)
+        watchdog.daemon = True
+        watchdog.start()
+
         graph = build_graph()
         context = AgentContext(driver=driver, vector_store=None)
         state = initial_state(task=req.task, test_command=req.test_command, max_iterations=req.max_iterations)
+        deadline = time.monotonic() + settings.TASK_MAX_WALL_SECONDS
 
         final_state = dict(state)
         for step in graph.stream(state, context=context, stream_mode="updates"):
             for node_name, node_output in step.items():
                 final_state.update(node_output)
                 emit({"type": "node", "node": node_name, "data": node_output})
+            if time.monotonic() > deadline or timed_out:
+                raise TimeoutError(f"task exceeded {settings.TASK_MAX_WALL_SECONDS}s wall-clock limit")
 
         status = final_state["status"]
         emit({"type": "done", "status": status, "final_state": final_state})
     except Exception as e:
         logger.exception("task %s failed", task_id_str)
         status = "error"
-        error_message = str(e)
+        error_message = str(e) if not timed_out else f"task exceeded {settings.TASK_MAX_WALL_SECONDS}s wall-clock limit"
         final_state = {"error": error_message}
         emit({"type": "error", "message": error_message})
     finally:
+        if watchdog is not None:
+            watchdog.cancel()
         if driver is not None:
             try:
                 driver.stop()

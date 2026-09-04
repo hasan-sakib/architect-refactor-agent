@@ -21,8 +21,19 @@ class SandboxConfig:
     image: str = "refactor-agent-sandbox:latest"
     mount_path: str = "/workspace"
     mem_limit: str = "2g"
+    # Without an explicit swap limit equal to mem_limit, Docker silently
+    # allows the container to use up to 2x mem_limit via swap.
+    memswap_limit: Optional[str] = None
     nano_cpus: Optional[int] = None
+    pids_limit: Optional[int] = None  # fork-bomb containment
     network_disabled: bool = False
+    network: Optional[str] = None  # isolated bridge name; mutually exclusive with network_disabled
+    user: Optional[str] = None  # e.g. "1000:1000" — explicit non-root
+    cap_drop: list[str] = field(default_factory=list)
+    cap_add: list[str] = field(default_factory=list)
+    security_opt: list[str] = field(default_factory=list)
+    tmpfs: dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
     environment: dict[str, str] = field(default_factory=dict)
     name: Optional[str] = None
 

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.schemas import TaskCreateRequest
@@ -125,6 +125,16 @@ def reconcile_orphaned(db: Session) -> int:
     if count:
         logger.warning("reconciled %d orphaned task(s) on startup", count)
     return count
+
+
+def count_active_tasks(db: Session, *, user_id: Optional[uuid.UUID] = None) -> int:
+    """Admission-control check: caps concurrent sandbox executions, either
+    globally or per-user. A bounded worker pool alone would just silently
+    queue excess submissions — this lets the API return 429 instead."""
+    query = select(func.count()).select_from(Task).where(Task.status.in_(ACTIVE_STATUSES))
+    if user_id is not None:
+        query = query.where(Task.user_id == user_id)
+    return db.execute(query).scalar_one()
 
 
 def active_repo_paths(db: Session) -> set[str]:

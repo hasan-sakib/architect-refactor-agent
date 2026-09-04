@@ -51,19 +51,41 @@ class DockerSandboxDriver(BaseSandboxDriver):
 
     def start(self) -> str:
         name = self.config.name or f"sandbox-{uuid.uuid4().hex[:10]}"
+        run_kwargs: dict = dict(
+            image=self.config.image,
+            command=["sleep", "infinity"],
+            detach=True,
+            name=name,
+            volumes={self.config.workspace_path: {"bind": self.config.mount_path, "mode": "rw"}},
+            working_dir=self.config.mount_path,
+            mem_limit=self.config.mem_limit,
+            nano_cpus=self.config.nano_cpus,
+            environment=self.config.environment,
+            labels={**self.config.labels, "refactor-agent.managed": "true"},
+        )
+        if self.config.memswap_limit:
+            run_kwargs["memswap_limit"] = self.config.memswap_limit
+        if self.config.pids_limit is not None:
+            run_kwargs["pids_limit"] = self.config.pids_limit
+        if self.config.user:
+            run_kwargs["user"] = self.config.user
+        if self.config.cap_drop:
+            run_kwargs["cap_drop"] = self.config.cap_drop
+        if self.config.cap_add:
+            run_kwargs["cap_add"] = self.config.cap_add
+        if self.config.security_opt:
+            run_kwargs["security_opt"] = self.config.security_opt
+        if self.config.tmpfs:
+            run_kwargs["tmpfs"] = self.config.tmpfs
+        # Mutually exclusive in the Docker API — a named network implies
+        # network access, so it can't also be network_disabled.
+        if self.config.network_disabled:
+            run_kwargs["network_disabled"] = True
+        elif self.config.network:
+            run_kwargs["network"] = self.config.network
+
         try:
-            self._container = self._client.containers.run(
-                image=self.config.image,
-                command=["tail", "-f", "/dev/null"],
-                detach=True,
-                name=name,
-                volumes={self.config.workspace_path: {"bind": self.config.mount_path, "mode": "rw"}},
-                working_dir=self.config.mount_path,
-                mem_limit=self.config.mem_limit,
-                nano_cpus=self.config.nano_cpus,
-                network_disabled=self.config.network_disabled,
-                environment=self.config.environment,
-            )
+            self._container = self._client.containers.run(**run_kwargs)
             return self._container.id
         except (APIError, ImageNotFound) as e:
             raise SandboxStartError(str(e)) from e
@@ -145,3 +167,18 @@ class DockerSandboxDriver(BaseSandboxDriver):
         if not self._container:
             return ""
         return self._container.logs(tail=tail or "all").decode(errors="replace")
+
+
+def reap_orphaned_sandboxes() -> int:
+    """If the backend restarts mid-task (crash, redeploy), its sandbox
+    containers leak and hold memory/CPU forever — find and remove them via
+    the label every sandbox container gets in start(). Called once from the
+    FastAPI lifespan on startup."""
+    client = docker.from_env()
+    orphans = client.containers.list(all=True, filters={"label": "refactor-agent.managed=true"})
+    for container in orphans:
+        try:
+            container.remove(force=True)
+        except APIError:
+            pass
+    return len(orphans)

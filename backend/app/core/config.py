@@ -69,6 +69,24 @@ class Settings(BaseSettings):
     TEST_COMMAND_TIMEOUT: int = 240  # seconds; was hardcoded at 120, too short for cold npm ci/pip installs
     TASK_MAX_WALL_SECONDS: int = 900  # hard cap on total task duration across all self-heal iterations
     MAX_CONCURRENT_TASKS: int = 3  # bounded worker pool size for the sandbox executor
+    MAX_TASKS_PER_USER: int = 1  # concurrent running tasks per user, on top of the global pool above
+
+    # --- Upload retention ---
+    # Uploads never get cleaned up otherwise. Both mechanisms run: the TTL
+    # sweep is the safety net (catches uploads whose task never ran, or a
+    # crash mid-run); the grace period is the common path (frees space soon
+    # after a task finishes). Safe to be aggressive — diff content lives in
+    # task_events/final_state, not on disk, so deleting the upload doesn't
+    # break the UI for an already-finished task.
+    UPLOAD_RETENTION_HOURS: int = 24
+    UPLOAD_POST_TASK_GRACE_MINUTES: int = 60
+    UPLOAD_SWEEP_INTERVAL_MINUTES: int = 15
+
+    # --- Sandbox hardening ---
+    SANDBOX_UID: int = 1000  # matches Dockerfile.sandbox's non-root `sandbox` user
+    SANDBOX_GID: int = 1000
+    SANDBOX_PIDS_LIMIT: int = 256  # fork-bomb containment
+    SANDBOX_NETWORK_NAME: Optional[str] = None  # set in production to an isolated bridge (enable_icc=false)
 
     # --- Auth & persistence ---
     # AUTH_MODE="disabled" is the local-dev escape hatch: every request is
@@ -89,8 +107,10 @@ class Settings(BaseSettings):
     STREAM_TICKET_TTL_SECONDS: int = 600
 
     # Local/admin escape hatch: lets the "type a host path" field work.
-    # Never true in production — the public product is uploads-only.
-    ALLOW_ARBITRARY_REPO_PATH: bool = True
+    # Defaults to false (safe-by-default) — the product is uploads-only;
+    # opt back in explicitly via .env, and only if the mount actually covers
+    # the path you want to type. Never true in production.
+    ALLOW_ARBITRARY_REPO_PATH: bool = False
 
     @model_validator(mode="after")
     def _validate_production_auth(self) -> "Settings":

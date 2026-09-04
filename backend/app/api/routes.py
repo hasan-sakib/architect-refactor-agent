@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -22,7 +23,11 @@ from app.api.schemas import (
 )
 from app.core.auth import TokenError
 from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.core.retention import check_disk_space
 from app.core.stream_ticket import issue_stream_ticket, verify_stream_ticket
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api")
 settings = get_settings()
@@ -51,12 +56,30 @@ def client_config() -> ClientConfigResponse:
     )
 
 
+def _chown_tree(root: Path, uid: int, gid: int) -> None:
+    """Uploaded files are written by the backend (root in the container);
+    Dockerfile.sandbox runs as uid 1000. Without this, the Coder node's first
+    write_file() into /workspace fails with Permission denied — masked on
+    macOS Docker Desktop's FUSE layer, real on a Linux VM. Harmless no-op
+    failure on native (non-Docker) dev, where the backend runs as a normal
+    unprivileged user and can't chown to an arbitrary uid anyway."""
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            os.chown(dirpath, uid, gid)
+            for name in filenames:
+                os.chown(os.path.join(dirpath, name), uid, gid)
+    except (PermissionError, OSError):
+        pass
+
+
 @router.post("/uploads", response_model=UploadResponse)
 async def upload_repository(user: CurrentUser, db: DbSession, files: list[UploadFile] = File(...)) -> UploadResponse:
     if not files:
         raise HTTPException(status_code=400, detail="no files provided")
     if len(files) > settings.MAX_UPLOAD_FILES:
         raise HTTPException(status_code=413, detail=f"too many files (max {settings.MAX_UPLOAD_FILES})")
+    if not check_disk_space():
+        raise HTTPException(status_code=507, detail="server is temporarily out of upload capacity")
 
     dest_root = Path(settings.upload_root) / str(user.id) / uuid.uuid4().hex[:12]
     dest_root.mkdir(parents=True, exist_ok=True)
@@ -82,6 +105,8 @@ async def upload_repository(user: CurrentUser, db: DbSession, files: list[Upload
         shutil.rmtree(dest_root, ignore_errors=True)
         raise
 
+    _chown_tree(dest_root, settings.SANDBOX_UID, settings.SANDBOX_GID)
+
     upload_row = task_store.create_upload(
         db, user_id=user.id, repo_path=str(dest_root), file_count=len(files), total_bytes=total_bytes
     )
@@ -102,6 +127,13 @@ async def create_task(req: TaskCreateRequest, user: CurrentUser, db: DbSession) 
         upload = task_store.get_or_create_local_upload(db, user_id=user.id, repo_path=repo_path)
     else:
         raise HTTPException(status_code=400, detail="upload_id is required")
+
+    user_active = task_store.count_active_tasks(db, user_id=user.id)
+    if user_active >= settings.MAX_TASKS_PER_USER:
+        raise HTTPException(status_code=429, detail="you already have a task running — wait for it to finish")
+    total_active = task_store.count_active_tasks(db)
+    if total_active >= settings.MAX_CONCURRENT_TASKS:
+        raise HTTPException(status_code=429, detail="server is at capacity — try again shortly")
 
     task = task_store.create_task(db, user_id=user.id, upload_id=upload.id, repo_path=repo_path, req=req)
 
