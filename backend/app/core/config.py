@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -57,6 +58,52 @@ class Settings(BaseSettings):
     def upload_root(self) -> str:
         base = self.HOST_HOME or str(Path.home())
         return str(Path(base) / ".refactor-agent-uploads")
+
+    # --- Limits (sized for a public multi-tenant deployment, not solo use) ---
+    MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024  # 100 MiB total per upload
+    MAX_UPLOAD_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MiB per individual file
+    # Starlette's multipart parser hard-caps at 1000 files per request
+    # regardless of this setting (raises its own 400 first) — kept in sync
+    # rather than left as an unreachable, misleadingly higher number.
+    MAX_UPLOAD_FILES: int = 1000
+    TEST_COMMAND_TIMEOUT: int = 240  # seconds; was hardcoded at 120, too short for cold npm ci/pip installs
+    TASK_MAX_WALL_SECONDS: int = 900  # hard cap on total task duration across all self-heal iterations
+    MAX_CONCURRENT_TASKS: int = 3  # bounded worker pool size for the sandbox executor
+
+    # --- Auth & persistence ---
+    # AUTH_MODE="disabled" is the local-dev escape hatch: every request is
+    # treated as a fixed synthetic user, no Supabase project needed. Never
+    # valid in production — enforced by the validator below.
+    AUTH_MODE: str = "disabled"  # "disabled" | "supabase"
+    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/refactor_agent"
+
+    SUPABASE_URL: str = ""
+    SUPABASE_JWT_SECRET: Optional[str] = None  # legacy HS256 shared secret, if not using JWKS
+    SUPABASE_JWT_AUDIENCE: str = "authenticated"
+
+    # Signs short-lived, task-scoped SSE stream tickets (EventSource can't
+    # set an Authorization header). Must be set to a real random value in
+    # production; the local-dev default is fine only because AUTH_MODE is
+    # "disabled" there too.
+    STREAM_TICKET_SECRET: str = "local-dev-insecure-stream-ticket-secret"
+    STREAM_TICKET_TTL_SECONDS: int = 600
+
+    # Local/admin escape hatch: lets the "type a host path" field work.
+    # Never true in production — the public product is uploads-only.
+    ALLOW_ARBITRARY_REPO_PATH: bool = True
+
+    @model_validator(mode="after")
+    def _validate_production_auth(self) -> "Settings":
+        if self.APP_ENV == "production":
+            if self.AUTH_MODE != "supabase":
+                raise ValueError("AUTH_MODE must be 'supabase' when APP_ENV=production")
+            if not self.SUPABASE_URL:
+                raise ValueError("SUPABASE_URL must be set when APP_ENV=production")
+            if self.STREAM_TICKET_SECRET == "local-dev-insecure-stream-ticket-secret":
+                raise ValueError("STREAM_TICKET_SECRET must be overridden when APP_ENV=production")
+            if self.ALLOW_ARBITRARY_REPO_PATH:
+                raise ValueError("ALLOW_ARBITRARY_REPO_PATH must be false when APP_ENV=production")
+        return self
 
 
 @lru_cache

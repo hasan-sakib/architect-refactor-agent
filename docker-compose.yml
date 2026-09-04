@@ -4,17 +4,20 @@ services:
       context: ./backend
     # Docker-outside-of-Docker: the backend runs *inside* this container but
     # must still build/start sandbox containers via the host's Docker daemon
-    # (paths in bind mounts, e.g. a target repo's host path, are resolved by
-    # that daemon against the host filesystem — this is what makes DooD work
-    # transparently for repo_path values the user enters in the UI).
+    # (paths in bind mounts are resolved by that daemon against the host
+    # filesystem — this is what makes DooD work transparently for uploaded
+    # repo paths).
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mirror-mounted at the same path as on the host: repo_path values the
-      # user enters (e.g. /Users/you/some-repo) must resolve both when the
-      # backend itself stats the path (this mount) AND when the host's Docker
-      # daemon bind-mounts it into a sandbox container (via the socket above,
-      # which always resolves paths against the host, not this container).
-      - ${HOME}:${HOME}
+      # Mirror-mounted at the same path as on the host, scoped to just the
+      # uploads directory (not the whole home directory) — uploaded repo
+      # paths must resolve both when the backend itself stats the path (this
+      # mount) AND when the host's Docker daemon bind-mounts it into a
+      # sandbox container (via the socket above, which always resolves paths
+      # against the host, not this container). The app is uploads-only now
+      # (ALLOW_ARBITRARY_REPO_PATH=false below), so this is the only
+      # directory the backend ever needs to see.
+      - ${HOME}/.refactor-agent-uploads:${HOME}/.refactor-agent-uploads
     env_file:
       - ./backend/.env
     environment:
@@ -26,8 +29,14 @@ services:
       # need to land under the host's real home dir so the mirror mount
       # above and the host Docker daemon's bind-mount both see the same path.
       HOST_HOME: ${HOME}
+      # Overrides config.py's localhost default — inside this container,
+      # "localhost" would mean the backend container itself, not the db service.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/refactor_agent
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:
@@ -36,6 +45,22 @@ services:
       - "5173:80"
     depends_on:
       - backend
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: refactor_agent
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # ---- Reserved for Phase 2 ----
   # chroma:
@@ -53,5 +78,6 @@ services:
   #   ports:
   #     - "11434:11434"
 
-# volumes:
-#   chroma_data:
+volumes:
+  db_data:
+# chroma_data:

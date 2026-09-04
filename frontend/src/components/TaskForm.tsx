@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { uploadRepository } from "../api";
+import { getClientConfig, uploadRepository } from "../api";
 import type { TaskCreateRequest } from "../types";
 
 interface TaskFormProps {
@@ -8,16 +8,29 @@ interface TaskFormProps {
   disabled: boolean;
 }
 
+const MAX_ITERATIONS_CAP = 3;
+
 export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
+  const [allowHostPaths, setAllowHostPaths] = useState(false);
   const [repoPath, setRepoPath] = useState("");
+  const [uploadId, setUploadId] = useState<string | null>(null);
   const [task, setTask] = useState("");
   const [testCommand, setTestCommand] = useState("pytest -q");
-  const [maxIterations, setMaxIterations] = useState(3);
+  const [maxIterations, setMaxIterations] = useState(MAX_ITERATIONS_CAP);
   const [uploadState, setUploadState] = useState<
-    { status: "idle" } | { status: "uploading" } | { status: "done"; fileCount: number } | { status: "error"; message: string }
+    | { status: "idle" }
+    | { status: "uploading" }
+    | { status: "done"; fileCount: number }
+    | { status: "error"; message: string }
   >({ status: "idle" });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getClientConfig()
+      .then((cfg) => setAllowHostPaths(cfg.allow_host_paths))
+      .catch(() => {}); // config endpoint failing shouldn't block the form — defaults to uploads-only
+  }, []);
 
   // webkitdirectory has no JSX/TS prop — set it imperatively on the input.
   useEffect(() => {
@@ -28,33 +41,42 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
     if (!fileList || fileList.length === 0) return;
     setUploadState({ status: "uploading" });
     try {
-      const { repoPath: uploadedPath, fileCount } = await uploadRepository(fileList);
-      setRepoPath(uploadedPath);
+      const { uploadId: newUploadId, fileCount } = await uploadRepository(fileList);
+      setUploadId(newUploadId);
+      setRepoPath("");
       setUploadState({ status: "done", fileCount });
     } catch (err) {
       setUploadState({ status: "error", message: err instanceof Error ? err.message : String(err) });
     }
   }
 
+  const canSubmit = Boolean(uploadId || (allowHostPaths && repoPath));
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit({ repo_path: repoPath, task, test_command: testCommand, max_iterations: maxIterations });
+        onSubmit({
+          upload_id: uploadId ?? undefined,
+          repo_path: uploadId ? undefined : repoPath,
+          task,
+          test_command: testCommand,
+          max_iterations: maxIterations,
+        });
       }}
       className="flex flex-col gap-3 rounded-lg border border-neutral-800 bg-neutral-950 p-4"
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs text-neutral-400">
           <div className="flex items-center justify-between">
-            <span>Repository path (host)</span>
+            <span>Repository</span>
             <button
               type="button"
               disabled={disabled || uploadState.status === "uploading"}
               onClick={() => fileInputRef.current?.click()}
               className="text-xs font-medium text-sky-400 hover:text-sky-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {uploadState.status === "uploading" ? "Uploading…" : "Upload folder instead"}
+              {uploadState.status === "uploading" ? "Uploading…" : "Upload folder"}
             </button>
             <input
               ref={fileInputRef}
@@ -64,18 +86,26 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
               onChange={(e) => handleFolderSelected(e.target.files)}
             />
           </div>
-          <input
-            required
-            disabled={disabled}
-            value={repoPath}
-            onChange={(e) => setRepoPath(e.target.value)}
-            placeholder="/path/to/target/repo"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-mono text-sm text-neutral-100 disabled:opacity-50"
-          />
+          {allowHostPaths && (
+            <input
+              disabled={disabled}
+              value={repoPath}
+              onChange={(e) => {
+                setRepoPath(e.target.value);
+                setUploadId(null);
+                setUploadState({ status: "idle" });
+              }}
+              placeholder="/path/to/target/repo (local/admin only)"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-mono text-sm text-neutral-100 disabled:opacity-50"
+            />
+          )}
           {uploadState.status === "done" && (
             <span className="text-emerald-400">Uploaded {uploadState.fileCount} file(s)</span>
           )}
           {uploadState.status === "error" && <span className="text-rose-400">{uploadState.message}</span>}
+          {!allowHostPaths && uploadState.status === "idle" && (
+            <span className="text-neutral-600">Upload a project folder to get started</span>
+          )}
         </label>
         <label className="flex flex-col gap-1 text-xs text-neutral-400">
           Test command (runs inside sandbox)
@@ -108,16 +138,16 @@ export function TaskForm({ onSubmit, disabled }: TaskFormProps) {
           <input
             type="number"
             min={0}
-            max={10}
+            max={MAX_ITERATIONS_CAP}
             disabled={disabled}
             value={maxIterations}
-            onChange={(e) => setMaxIterations(Number(e.target.value))}
+            onChange={(e) => setMaxIterations(Math.min(MAX_ITERATIONS_CAP, Number(e.target.value)))}
             className="w-16 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 disabled:opacity-50"
           />
         </label>
         <button
           type="submit"
-          disabled={disabled}
+          disabled={disabled || !canSubmit}
           className="rounded bg-sky-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {disabled ? "Running…" : "Start Task"}

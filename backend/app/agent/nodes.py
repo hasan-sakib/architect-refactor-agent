@@ -12,6 +12,7 @@ from app.agent.prompts import (
     render_error_section,
 )
 from app.agent.state import AgentContext, AgentState
+from app.core.config import get_settings
 from app.core.llm import get_completion
 from app.core.logging import get_logger
 from app.tools.exec_tools import run_command
@@ -19,6 +20,7 @@ from app.tools.file_tools import read_file, write_file
 from app.tools.search_tools import format_search_results, search_codebase
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 FILE_BLOCK_RE = re.compile(r"###\s*FILE:\s*(?P<path>.+?)\s*\n(?P<content>.*?)\n###\s*END FILE", re.DOTALL)
 
@@ -73,7 +75,7 @@ def coder_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
 
 
 def tester_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
-    result = run_command(runtime.context.driver, state["test_command"], timeout=120)
+    result = run_command(runtime.context.driver, state["test_command"], timeout=settings.TEST_COMMAND_TIMEOUT)
     combined_output = f"$ {state['test_command']}\n{result.stdout}\n{result.stderr}".strip()
     logger.info("tester exit_code=%s", result.exit_code)
 

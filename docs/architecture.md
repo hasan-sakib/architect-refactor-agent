@@ -48,8 +48,8 @@ React + TypeScript, talking to the backend purely through `fetch`/`EventSource` 
 ## Dockerized deployment
 
 `docker-compose.yml` builds both `backend` and `frontend` as containers:
-- `backend` uses Docker-outside-of-Docker (the host's `/var/run/docker.sock` is bind-mounted in) so it can still build/start sandbox containers via the *host's* Docker daemon, even though the backend itself now runs inside a container. Bind-mount paths (like a target repo's `repo_path`) are always resolved by that host daemon against the host filesystem — this is what makes DooD transparent for paths the user types into the UI.
-- The backend container also mirror-mounts the host's home directory at the same path, so the backend's own filesystem checks (e.g. validating `repo_path` exists before starting a task) agree with what the host daemon sees.
+- `backend` uses Docker-outside-of-Docker (the host's `/var/run/docker.sock` is bind-mounted in) so it can still build/start sandbox containers via the *host's* Docker daemon, even though the backend itself now runs inside a container. Bind-mount paths (like an uploaded repo's path) are always resolved by that host daemon against the host filesystem — this is what makes DooD transparent for the paths the app generates on upload.
+- The backend container also mirror-mounts a scoped `~/.refactor-agent-uploads` directory at the same path (not the whole home directory — the app is uploads-only, so that's the only path space it ever needs), so the backend's own filesystem checks agree with what the host daemon sees.
 - `frontend` is a multi-stage build: compiled by Vite, served by nginx, which also reverse-proxies `/api/*` to the backend — same-origin from the browser's perspective, so no CORS is needed in this path.
 - Ollama is deliberately **not** containerized — Docker Desktop on macOS has no Metal/GPU passthrough, so a containerized Ollama would fall back to CPU-only inference. The backend reaches the host's native Ollama via `host.docker.internal`.
 

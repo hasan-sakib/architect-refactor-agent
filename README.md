@@ -35,7 +35,7 @@ docker compose up -d --build
 
 Open **http://localhost:5173**.
 
-The backend container only sees paths under your home directory (mirror-mounted at the same path) — `repo_path` in the UI must point somewhere under `$HOME`.
+The app is uploads-only: the backend container only has access to a scoped `~/.refactor-agent-uploads` directory (mirror-mounted at the same path), not your whole home folder — upload a project folder through the UI rather than typing a host path.
 
 ## How to use it
 
@@ -43,7 +43,7 @@ Fill in the form and click **Start Task**:
 
 | Field | Meaning | Example |
 |---|---|---|
-| Repository path (host) | Absolute path to the target repo, under `$HOME` | `/Users/you/projects/some-repo` |
+| Repository | Click "Upload folder" and pick a project folder | — |
 | Task | Plain-English description of the fix/refactor | "Fix the off-by-one error in pagination" |
 | Test command | Runs inside the sandbox to verify success | `cd /workspace && npm install && npm test` |
 | Max self-heal iterations | Retry budget after a failing test | `3` |

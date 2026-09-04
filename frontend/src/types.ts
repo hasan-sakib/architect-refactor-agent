@@ -31,16 +31,40 @@ export interface AgentState {
   status?: AgentStatus;
 }
 
-export type StreamEvent =
+export type StreamEvent = { seq?: number; ts?: number } & (
   | { type: "status"; status: AgentStatus }
   | { type: "log"; message: string }
   | { type: "node"; node: NodeName; data: Partial<AgentState> }
   | { type: "done"; status: AgentStatus; final_state: AgentState }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+);
 
 export interface TaskCreateRequest {
-  repo_path: string;
+  upload_id?: string;
+  repo_path?: string;
   task: string;
   test_command: string;
   max_iterations: number;
+}
+
+export interface TaskSummary {
+  id: string;
+  status: AgentStatus;
+  task: string;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface TaskStatusPayload {
+  id: string;
+  status: AgentStatus;
+  events: StreamEvent[];
+  final_state: AgentState | null;
+}
+
+export interface ClientConfig {
+  allow_host_paths: boolean;
+  max_upload_bytes: number;
+  max_upload_files: number;
+  max_iterations_cap: number;
 }
